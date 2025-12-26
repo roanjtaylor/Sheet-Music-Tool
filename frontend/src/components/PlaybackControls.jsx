@@ -1,3 +1,5 @@
+import { MIN_TEMPO, MAX_TEMPO, MIN_ZOOM, MAX_ZOOM } from '../constants';
+
 export default function PlaybackControls({
   isPlaying,
   isLoading,
@@ -47,8 +49,8 @@ export default function PlaybackControls({
         <span className="text-sm text-gray-500">Tempo:</span>
         <input
           type="range"
-          min="20"
-          max="300"
+          min={MIN_TEMPO}
+          max={MAX_TEMPO}
           value={tempo}
           onChange={(e) => onTempoChange(parseInt(e.target.value))}
           disabled={disabled}
@@ -66,11 +68,11 @@ export default function PlaybackControls({
       <div className="flex items-center gap-1">
         <button
           onClick={onZoomOut}
-          disabled={disabled || zoom <= 0.5}
+          disabled={disabled || zoom <= MIN_ZOOM}
           className={`
             w-8 h-8 rounded flex items-center justify-center text-lg font-bold
             transition-colors duration-200
-            ${disabled || zoom <= 0.5
+            ${disabled || zoom <= MIN_ZOOM
               ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
               : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
             }
@@ -84,11 +86,11 @@ export default function PlaybackControls({
         </span>
         <button
           onClick={onZoomIn}
-          disabled={disabled || zoom >= 2.0}
+          disabled={disabled || zoom >= MAX_ZOOM}
           className={`
             w-8 h-8 rounded flex items-center justify-center text-lg font-bold
             transition-colors duration-200
-            ${disabled || zoom >= 2.0
+            ${disabled || zoom >= MAX_ZOOM
               ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
               : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
             }

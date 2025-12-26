@@ -10,7 +10,10 @@
       "Bash(python:*)",
       "Bash(dir \"C:\\\\Users\\\\roanj\\\\Sheet Music Tool\" /b)",
       "WebSearch",
-      "Bash(dir \"C:\\\\Users\\\\roanj\\\\Sheet Music Tool\\\\test-images\" /b)"
+      "Bash(dir \"C:\\\\Users\\\\roanj\\\\Sheet Music Tool\\\\test-images\" /b)",
+      "Bash(cat:*)",
+      "Bash(wc:*)",
+      "Bash(npx eslint:*)"
     ]
   }
 }

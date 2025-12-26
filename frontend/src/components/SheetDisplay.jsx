@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { OpenSheetMusicDisplay as OSMD } from 'opensheetmusicdisplay';
+import { HIGHLIGHT_COLOR, DEFAULT_COLOR } from '../constants';
 
 const SheetDisplay = forwardRef(function SheetDisplay(
   { musicxml, errors = [], zoom = 1.0 },
@@ -19,10 +20,11 @@ const SheetDisplay = forwardRef(function SheetDisplay(
       drawComposer: true,
       drawCredits: true,
       drawPartNames: true,
+      autoBeam: true, // Automatically beam eighth notes and shorter together
       followCursor: false, // Disabled to allow free scrolling during playback
       cursorsOptions: [{
         type: 0, // Standard cursor
-        color: '#ff0000',
+        color: HIGHLIGHT_COLOR,
         alpha: 0.5,
         follow: false, // Disabled to allow free scrolling
       }],
@@ -42,9 +44,8 @@ const SheetDisplay = forwardRef(function SheetDisplay(
     const loadSheet = async () => {
       try {
         await osmdRef.current.load(musicxml);
-        osmdRef.current.zoom = zoom;
         osmdRef.current.render();
-        // Enable cursor after render
+        // Cursor will be hidden initially
         if (osmdRef.current.cursor) {
           osmdRef.current.cursor.hide();
         }
@@ -64,24 +65,23 @@ const SheetDisplay = forwardRef(function SheetDisplay(
     osmdRef.current.render();
   }, [zoom, musicxml]);
 
-  // Reset ALL red elements in the SVG back to black
-  // This is more robust than trying to track individual elements
+  // Reset all highlighted elements back to default color
   const resetAllRedElements = useCallback(() => {
     const svgContainer = containerRef.current?.querySelector('svg');
     if (!svgContainer) return;
 
-    // Find all elements with red fill and reset to black
-    const redElements = svgContainer.querySelectorAll('[fill="#ff0000"], [fill="red"]');
+    // Find all elements with highlight fill and reset to default
+    const redElements = svgContainer.querySelectorAll(`[fill="${HIGHLIGHT_COLOR}"], [fill="red"]`);
     redElements.forEach((el) => {
-      el.setAttribute('fill', '#000000');
+      el.setAttribute('fill', DEFAULT_COLOR);
     });
 
     // Also check style.fill
     const allPaths = svgContainer.querySelectorAll('path, ellipse');
     allPaths.forEach((el) => {
-      if (el.style.fill === '#ff0000' || el.style.fill === 'red' || el.style.fill === 'rgb(255, 0, 0)') {
+      if (el.style.fill === HIGHLIGHT_COLOR || el.style.fill === 'red' || el.style.fill === 'rgb(255, 0, 0)') {
         el.style.fill = '';
-        el.setAttribute('fill', '#000000');
+        el.setAttribute('fill', DEFAULT_COLOR);
       }
     });
   }, []);
@@ -92,7 +92,7 @@ const SheetDisplay = forwardRef(function SheetDisplay(
     if (osmdRef.current?.cursor) {
       try {
         osmdRef.current.cursor.hide();
-      } catch (e) {
+      } catch {
         // Ignore
       }
     }
@@ -113,7 +113,7 @@ const SheetDisplay = forwardRef(function SheetDisplay(
       let gNotesUnderCursor = [];
       try {
         gNotesUnderCursor = cursor.GNotesUnderCursor() || [];
-      } catch (e) {
+      } catch {
         // Some OSMD versions may not have this method
       }
 
@@ -131,7 +131,7 @@ const SheetDisplay = forwardRef(function SheetDisplay(
         if (svgElement) {
           const paths = svgElement.querySelectorAll('path, ellipse');
           paths.forEach((path) => {
-            path.setAttribute('fill', '#ff0000');
+            path.setAttribute('fill', HIGHLIGHT_COLOR);
           });
         }
       });
@@ -151,20 +151,20 @@ const SheetDisplay = forwardRef(function SheetDisplay(
                       const svgEl = gn.vfnote[0].attrs.el;
                       const paths = svgEl.querySelectorAll('path, ellipse');
                       paths.forEach((path) => {
-                        path.setAttribute('fill', '#ff0000');
+                        path.setAttribute('fill', HIGHLIGHT_COLOR);
                       });
                     }
                   });
                 }
-              } catch (e) {
+              } catch {
                 // Ignore individual note errors
               }
             }
           });
         });
       }
-    } catch (err) {
-      console.debug('Highlight error:', err);
+    } catch {
+      // Ignore highlight errors
     }
   }, [resetAllRedElements]);
 
@@ -343,7 +343,7 @@ const SheetDisplay = forwardRef(function SheetDisplay(
                 new ClipboardItem({ 'image/png': blob }),
               ]);
               alert('Sheet music copied to clipboard!');
-            } catch (err) {
+            } catch {
               // Fallback: download as file
               const downloadUrl = URL.createObjectURL(blob);
               const a = document.createElement('a');
@@ -378,8 +378,7 @@ const SheetDisplay = forwardRef(function SheetDisplay(
       }
 
       return !cursor.Iterator?.EndReached;
-    } catch (err) {
-      console.error('[DEBUG] moveCursorToPosition error:', err);
+    } catch {
       return false;
     }
   }, []);

@@ -1,18 +1,15 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import * as Tone from 'tone';
-
-// Salamander piano samples URL (free samples hosted by Tone.js)
-const SALAMANDER_URL = 'https://tonejs.github.io/audio/salamander/';
+import { SALAMANDER_PIANO_URL, DEFAULT_TEMPO, MIN_TEMPO, MAX_TEMPO } from '../constants';
 
 export default function usePlayback(sheetDisplayRef) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [tempo, setTempo] = useState(120);
+  const [tempo, setTempo] = useState(DEFAULT_TEMPO);
   const [currentPosition, setCurrentPosition] = useState(0);
 
   const pianoRef = useRef(null);
   const scheduledEventsRef = useRef([]);
-  const animationFrameRef = useRef(null);
   const startTimeRef = useRef(0);
   const pauseTimeRef = useRef(0);
   const notesRef = useRef([]);
@@ -58,7 +55,7 @@ export default function usePlayback(sheetDisplayRef) {
           C8: 'C8.mp3',
         },
         release: 1,
-        baseUrl: SALAMANDER_URL,
+        baseUrl: SALAMANDER_PIANO_URL,
       }).toDestination();
 
       await Tone.loaded();
@@ -165,11 +162,14 @@ export default function usePlayback(sheetDisplayRef) {
         // Calculate measure duration in quarter notes
         const measureDuration = (currentBeats * 4) / currentBeatType;
 
-        // Single cursor for timeline position (MusicXML standard)
+        // Track cursor position per staff to handle interleaved voices
+        // HOMR generates MusicXML where staff switches don't always have backups
         let cursor = 0;
         let maxCursor = 0; // Track the furthest point reached in this measure
         let lastNoteStart = 0;
         let prevWasRest = false;
+        const staffCursors = {}; // Track cursor per staff
+        let currentStaff = null; // Track which staff we're currently processing
 
         // Duration getter: prioritize <type>, fallback to <duration>/divisions
         const getDurationInQuarters = (element) => {
@@ -207,6 +207,10 @@ export default function usePlayback(sheetDisplayRef) {
 
           // Handle backup - move cursor backward
           if (el.tagName === 'backup') {
+            // Save current staff's cursor before backup
+            if (currentStaff !== null) {
+              staffCursors[currentStaff] = cursor;
+            }
             const durationEl = el.querySelector('duration');
             if (durationEl && divisions > 0) {
               const dur = parseFloat(durationEl.textContent) / divisions;
@@ -215,6 +219,11 @@ export default function usePlayback(sheetDisplayRef) {
                 if (cursor < 0) cursor = 0;
               }
             }
+            // Reset prevWasRest when switching voices - a rest in one voice
+            // should not affect chord detection in another voice
+            prevWasRest = false;
+            // Reset currentStaff so next note properly detects staff switch
+            currentStaff = null;
             continue;
           }
 
@@ -243,11 +252,28 @@ export default function usePlayback(sheetDisplayRef) {
             const isRest = noteEl.querySelector('rest') !== null;
             const duration = getDurationInQuarters(noteEl);
 
+            // Get staff number for this note (default to 1)
+            const staffEl = noteEl.querySelector('staff');
+            const noteStaff = staffEl ? parseInt(staffEl.textContent) || 1 : 1;
+
+            // Handle staff switching without backup (HOMR quirk)
+            // When switching staves, restore that staff's cursor position
+            if (currentStaff !== null && noteStaff !== currentStaff && !isChord) {
+              // Save current staff's cursor before switching
+              staffCursors[currentStaff] = cursor;
+              // Restore the target staff's cursor (or start from 0 if first time)
+              if (staffCursors[noteStaff] !== undefined) {
+                cursor = staffCursors[noteStaff];
+              }
+            }
+            currentStaff = noteStaff;
+
             // Handle rests: advance cursor
             if (isRest) {
               if (!isChord && duration > 0) {
                 cursor += duration;
                 if (cursor > maxCursor) maxCursor = cursor;
+                staffCursors[noteStaff] = cursor; // Update staff cursor
               }
               prevWasRest = true;
               continue;
@@ -274,6 +300,7 @@ export default function usePlayback(sheetDisplayRef) {
               lastNoteStart = cursor;
               cursor += duration;
               if (cursor > maxCursor) maxCursor = cursor;
+              staffCursors[noteStaff] = cursor; // Update staff cursor
             }
 
             prevWasRest = false;
@@ -309,9 +336,7 @@ export default function usePlayback(sheetDisplayRef) {
               if (tie.getAttribute('type') === 'stop') tieStop = true;
             });
 
-            // Get staff number (for piano grand staff: 1=treble, 2=bass)
-            const staffEl = noteEl.querySelector('staff');
-            const staff = staffEl ? parseInt(staffEl.textContent) || 1 : 1;
+            // noteStaff was already extracted earlier for cursor tracking
 
             notes.push({
               pitch: noteName,
@@ -322,7 +347,7 @@ export default function usePlayback(sheetDisplayRef) {
               tieStart,
               tieStop,
               partIndex,  // Track which part this note belongs to
-              staff,      // Track which staff within the part (1=treble, 2=bass for piano)
+              staff: noteStaff,  // Track which staff within the part (1=treble, 2=bass for piano)
             });
           }
         }
@@ -369,6 +394,25 @@ export default function usePlayback(sheetDisplayRef) {
 
     return merged;
   }, []);
+
+  // Stop (reset to beginning) - defined before schedulePlayback since it's called from there
+  const stop = useCallback(() => {
+    Tone.Transport.stop();
+    Tone.Transport.cancel();
+    pauseTimeRef.current = 0;
+    cursorPositionRef.current = 0;
+    setIsPlaying(false);
+    setCurrentPosition(0);
+
+    // Clear scheduled events
+    scheduledEventsRef.current.forEach((id) => Tone.Transport.clear(id));
+    scheduledEventsRef.current = [];
+
+    // Clear highlights
+    if (sheetDisplayRef?.current) {
+      sheetDisplayRef.current.clearHighlights();
+    }
+  }, [sheetDisplayRef]);
 
   // Schedule playback - simplified for reliable audio
   const schedulePlayback = useCallback(
@@ -442,7 +486,7 @@ export default function usePlayback(sheetDisplayRef) {
         scheduledEventsRef.current.push(endEventId);
       }
     },
-    [tempo, sheetDisplayRef]
+    [tempo, sheetDisplayRef, stop]
   );
 
   // Play (always starts from beginning)
@@ -494,25 +538,6 @@ export default function usePlayback(sheetDisplayRef) {
       sheetDisplayRef.current.clearHighlights();
     }
   }, [isPlaying, sheetDisplayRef]);
-
-  // Stop (reset to beginning)
-  const stop = useCallback(() => {
-    Tone.Transport.stop();
-    Tone.Transport.cancel();
-    pauseTimeRef.current = 0;
-    cursorPositionRef.current = 0; // Reset cursor position tracking
-    setIsPlaying(false);
-    setCurrentPosition(0);
-
-    // Clear scheduled events
-    scheduledEventsRef.current.forEach((id) => Tone.Transport.clear(id));
-    scheduledEventsRef.current = [];
-
-    // Clear highlights
-    if (sheetDisplayRef?.current) {
-      sheetDisplayRef.current.clearHighlights();
-    }
-  }, [sheetDisplayRef]);
 
   // Toggle play/pause
   const togglePlayPause = useCallback(

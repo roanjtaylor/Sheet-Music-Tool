@@ -1,7 +1,5 @@
 import { useState, useRef } from 'react';
-
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
-const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
+import { API_URL, MAX_FILE_SIZE, ALLOWED_FILE_TYPES } from '../constants';
 
 export default function Upload({ onProcessed, isProcessing, setIsProcessing }) {
   const [dragActive, setDragActive] = useState(false);
@@ -11,7 +9,7 @@ export default function Upload({ onProcessed, isProcessing, setIsProcessing }) {
 
   const validateFile = (file) => {
     if (!file) return 'No file selected';
-    if (!ALLOWED_TYPES.includes(file.type)) {
+    if (!ALLOWED_FILE_TYPES.includes(file.type)) {
       return 'Invalid file type. Please upload PNG or JPG only.';
     }
     if (file.size > MAX_FILE_SIZE) {
@@ -48,7 +46,7 @@ export default function Upload({ onProcessed, isProcessing, setIsProcessing }) {
         setProgress(prev => ({ ...prev, eta: remaining }));
       }, 1000);
 
-      const response = await fetch('http://localhost:8000/process', {
+      const response = await fetch(`${API_URL}/process`, {
         method: 'POST',
         body: formData,
       });
