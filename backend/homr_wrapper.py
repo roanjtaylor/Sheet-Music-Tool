@@ -8,6 +8,24 @@ import onnxruntime as ort
 from homr.main import process_image, ProcessingConfig, download_weights
 from homr.music_xml_generator import XmlGeneratorArguments
 
+# Monkey-patch HOMR to preserve tuplets during transcription
+# HOMR's default behavior aggressively removes "over-eager" tuplets, which
+# often incorrectly removes valid triplets. We patch it to preserve tuplets.
+import homr.transformer.vocabulary as _vocab
+
+def _patched_fix_over_eager_tuplets(chords):
+    """
+    Replacement for HOMR's _fix_over_eager_tuplets that preserves all tuplets.
+
+    The original function removes tuplets from measures shorter than average,
+    which incorrectly removes valid triplets. This version keeps all tuplets
+    so they appear correctly in the MusicXML output.
+    """
+    return chords
+
+# Apply the patch - this preserves triplets and other tuplets
+_vocab._fix_over_eager_tuplets = _patched_fix_over_eager_tuplets
+
 # Track if models have been downloaded
 _models_initialized = False
 

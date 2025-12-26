@@ -91,9 +91,15 @@ export default function usePlayback(sheetDisplayRef) {
 
     // Auto-detect divisions from notes that have both <type> and <duration>
     // This ensures correct calculation even if <divisions> element is missing or wrong
+    // IMPORTANT: Skip tuplet notes as their <duration> is already scaled and would
+    // give incorrect division values (e.g., triplet quarter with duration 2 instead of 3)
     const allNotes = doc.querySelectorAll('note');
     for (const noteEl of allNotes) {
       if (noteEl.querySelector('grace') || noteEl.querySelector('chord') || noteEl.querySelector('rest')) {
+        continue;
+      }
+      // Skip tuplet notes - they have scaled durations that would throw off our calculation
+      if (noteEl.querySelector('time-modification')) {
         continue;
       }
       const typeEl = noteEl.querySelector('type');
@@ -181,10 +187,31 @@ export default function usePlayback(sheetDisplayRef) {
         let chordStartTime = 0;
         let inChord = false;
 
+        // Helper: get tuplet time modification ratio
+        // Returns the multiplier to apply to base duration (e.g., 2/3 for triplets)
+        const getTupletRatio = (element) => {
+          const timeMod = element.querySelector('time-modification');
+          if (!timeMod) return 1;
+
+          const actualNotes = timeMod.querySelector('actual-notes');
+          const normalNotes = timeMod.querySelector('normal-notes');
+
+          if (actualNotes && normalNotes) {
+            const actual = parseInt(actualNotes.textContent) || 1;
+            const normal = parseInt(normalNotes.textContent) || 1;
+            // Triplet (3 notes in time of 2): actual=3, normal=2, ratio=2/3
+            // Duplet (2 notes in time of 3): actual=2, normal=3, ratio=3/2
+            return normal / actual;
+          }
+          return 1;
+        };
+
         // Duration getter: prioritize <type>, fallback to <duration>/divisions
+        // Accounts for tuplets via <time-modification> element
         const getDurationInQuarters = (element) => {
           const durationEl = element.querySelector('duration');
           const typeEl = element.querySelector('type');
+          const tupletRatio = getTupletRatio(element);
 
           // First: try <type> element (always reliable when present)
           if (typeEl && typeToQuarters[typeEl.textContent] !== undefined) {
@@ -196,10 +223,13 @@ export default function usePlayback(sheetDisplayRef) {
               dur += dotVal;
               dotVal /= 2;
             }
-            return dur;
+            // Apply tuplet ratio (e.g., triplet quarter = 1 * 2/3 = 0.666...)
+            return dur * tupletRatio;
           }
 
           // Second: use <duration>/divisions (the MusicXML standard way)
+          // Note: MusicXML <duration> already has tuplet scaling applied,
+          // so we don't multiply by tupletRatio here
           if (durationEl && divisions > 0) {
             const raw = parseFloat(durationEl.textContent);
             if (!isNaN(raw) && raw > 0) {
