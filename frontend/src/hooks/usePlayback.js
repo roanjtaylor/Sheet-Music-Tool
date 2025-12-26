@@ -162,14 +162,24 @@ export default function usePlayback(sheetDisplayRef) {
         // Calculate measure duration in quarter notes
         const measureDuration = (currentBeats * 4) / currentBeatType;
 
-        // Track cursor position per staff to handle interleaved voices
-        // HOMR generates MusicXML where staff switches don't always have backups
+        // Track cursor position per voice to handle multiple independent timelines
+        // In music notation, each voice within a staff has its own timeline.
+        // A minim in voice 1 and crotchets in voice 2 can overlap - they're independent.
         let cursor = 0;
         let maxCursor = 0; // Track the furthest point reached in this measure
         let lastNoteStart = 0;
         let prevWasRest = false;
-        const staffCursors = {}; // Track cursor per staff
+        const voiceCursors = {}; // Track cursor per voice (keyed by "staff-voice")
         let currentStaff = null; // Track which staff we're currently processing
+        let currentVoice = null; // Track which voice we're currently processing
+
+        // Track chord processing to handle mixed-duration chords correctly
+        // When a chord has notes with different durations (e.g., minim + crotchet),
+        // the cursor should advance by the minimum duration to avoid delaying
+        // subsequent melody notes
+        let chordMinDuration = Infinity;
+        let chordStartTime = 0;
+        let inChord = false;
 
         // Duration getter: prioritize <type>, fallback to <duration>/divisions
         const getDurationInQuarters = (element) => {
@@ -205,11 +215,20 @@ export default function usePlayback(sheetDisplayRef) {
         for (let i = 0; i < children.length; i++) {
           const el = children[i];
 
-          // Handle backup - move cursor backward
+          // Handle backup - move cursor backward (switching to a different voice)
           if (el.tagName === 'backup') {
-            // Save current staff's cursor before backup
-            if (currentStaff !== null) {
-              staffCursors[currentStaff] = cursor;
+            // Save current voice's cursor position before switching
+            // This is critical: each voice has its own timeline, so we must
+            // remember where we were in the current voice
+            if (currentVoice !== null) {
+              // Apply chord adjustment before saving
+              if (inChord && chordMinDuration !== Infinity) {
+                const adjustedCursor = chordStartTime + chordMinDuration;
+                if (adjustedCursor < cursor) {
+                  cursor = adjustedCursor;
+                }
+              }
+              voiceCursors[currentVoice] = cursor;
             }
             const durationEl = el.querySelector('duration');
             if (durationEl && divisions > 0) {
@@ -219,11 +238,12 @@ export default function usePlayback(sheetDisplayRef) {
                 if (cursor < 0) cursor = 0;
               }
             }
-            // Reset prevWasRest when switching voices - a rest in one voice
-            // should not affect chord detection in another voice
+            // Reset state for new voice
             prevWasRest = false;
-            // Reset currentStaff so next note properly detects staff switch
             currentStaff = null;
+            currentVoice = null; // Will be set by next note
+            inChord = false;
+            chordMinDuration = Infinity;
             continue;
           }
 
@@ -236,6 +256,9 @@ export default function usePlayback(sheetDisplayRef) {
                 cursor += dur;
               }
             }
+            // Reset chord tracking - forward means explicit position change
+            inChord = false;
+            chordMinDuration = Infinity;
             continue;
           }
 
@@ -252,29 +275,50 @@ export default function usePlayback(sheetDisplayRef) {
             const isRest = noteEl.querySelector('rest') !== null;
             const duration = getDurationInQuarters(noteEl);
 
-            // Get staff number for this note (default to 1)
+            // Get staff and voice for this note (defaults: staff=1, voice=1)
             const staffEl = noteEl.querySelector('staff');
             const noteStaff = staffEl ? parseInt(staffEl.textContent) || 1 : 1;
+            const voiceEl = noteEl.querySelector('voice');
+            const noteVoice = voiceEl ? parseInt(voiceEl.textContent) || 1 : 1;
+            // Create a unique key for this voice (staff-voice combination)
+            const voiceKey = `${noteStaff}-${noteVoice}`;
 
-            // Handle staff switching without backup (HOMR quirk)
-            // When switching staves, restore that staff's cursor position
-            if (currentStaff !== null && noteStaff !== currentStaff && !isChord) {
-              // Save current staff's cursor before switching
-              staffCursors[currentStaff] = cursor;
-              // Restore the target staff's cursor (or start from 0 if first time)
-              if (staffCursors[noteStaff] !== undefined) {
-                cursor = staffCursors[noteStaff];
+            // Handle voice switching (different voice or staff = different timeline)
+            // Each voice has its own independent cursor - a minim in voice 1
+            // doesn't affect when notes in voice 2 are played
+            if (currentVoice !== null && voiceKey !== currentVoice) {
+              // Save current voice's cursor before switching
+              if (inChord && chordMinDuration !== Infinity) {
+                const adjustedCursor = chordStartTime + chordMinDuration;
+                if (adjustedCursor < cursor) {
+                  cursor = adjustedCursor;
+                }
               }
+              voiceCursors[currentVoice] = cursor;
+              // Restore target voice's cursor (or start from current position if first time)
+              if (voiceCursors[voiceKey] !== undefined) {
+                cursor = voiceCursors[voiceKey];
+              }
+              // Note: if voiceCursors[voiceKey] is undefined, keep current cursor
+              // (backup already positioned us correctly)
+
+              // Reset chord tracking when switching voices
+              inChord = false;
+              chordMinDuration = Infinity;
             }
             currentStaff = noteStaff;
+            currentVoice = voiceKey;
 
             // Handle rests: advance cursor
             if (isRest) {
               if (!isChord && duration > 0) {
                 cursor += duration;
                 if (cursor > maxCursor) maxCursor = cursor;
-                staffCursors[noteStaff] = cursor; // Update staff cursor
+                voiceCursors[voiceKey] = cursor; // Update voice cursor
               }
+              // Reset chord tracking - a rest ends any pending chord adjustment
+              inChord = false;
+              chordMinDuration = Infinity;
               prevWasRest = true;
               continue;
             }
@@ -294,13 +338,37 @@ export default function usePlayback(sheetDisplayRef) {
             if (isChord && !prevWasRest) {
               // Chord: same time as previous note
               noteTime = lastNoteStart;
+              // Track minimum duration in this chord for proper cursor advancement
+              chordMinDuration = Math.min(chordMinDuration, duration);
+              inChord = true;
             } else {
-              // New note: use current cursor position
+              // New note: not part of a chord (or first note of a new chord)
+
+              // If we just finished processing a chord with mixed durations,
+              // adjust the cursor to use the minimum duration. This ensures
+              // subsequent melody notes aren't delayed when the first chord note
+              // was longer than others (e.g., minim with crotchet).
+              if (inChord && chordMinDuration !== Infinity) {
+                const adjustedCursor = chordStartTime + chordMinDuration;
+                if (adjustedCursor < cursor) {
+                  cursor = adjustedCursor;
+                  if (currentVoice !== null) {
+                    voiceCursors[currentVoice] = cursor;
+                  }
+                }
+              }
+
+              // Reset chord tracking
+              inChord = false;
+              chordMinDuration = duration; // This note becomes potential first of new chord
+              chordStartTime = cursor;
+
+              // Set note time and advance cursor
               noteTime = cursor;
               lastNoteStart = cursor;
               cursor += duration;
               if (cursor > maxCursor) maxCursor = cursor;
-              staffCursors[noteStaff] = cursor; // Update staff cursor
+              voiceCursors[voiceKey] = cursor; // Update voice cursor
             }
 
             prevWasRest = false;
