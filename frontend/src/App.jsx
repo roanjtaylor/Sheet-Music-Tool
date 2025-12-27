@@ -51,6 +51,7 @@ function App() {
         <div className="gradient-blob gradient-blob-2" />
         <div className="gradient-blob gradient-blob-3" />
         <div className="gradient-blob gradient-blob-4" />
+        <div className="gradient-blob gradient-blob-5" />
       </div>
 
       {/* Noise texture overlay for that skeuomorphic feel */}
@@ -72,7 +73,7 @@ function App() {
                 <h1 className="text-2xl font-bold text-shine">
                   Sheet Music Tool
                 </h1>
-                <p className="text-sm text-[#A0A0A0] mt-0.5">
+                <p className="text-sm text-[#FFD700] mt-0.5 opacity-90">
                   Upload piano sheet music and hear it played back
                 </p>
               </div>

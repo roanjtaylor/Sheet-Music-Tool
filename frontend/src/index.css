@@ -76,6 +76,21 @@
   }
 }
 
+@keyframes blobMove4 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+  25% {
+    transform: translate(-50px, 30px) scale(1.15) rotate(5deg);
+  }
+  50% {
+    transform: translate(20px, -40px) scale(0.9) rotate(-3deg);
+  }
+  75% {
+    transform: translate(40px, 50px) scale(1.1) rotate(2deg);
+  }
+}
+
 @keyframes pulseGlow {
   0%, 100% {
     box-shadow: 0 0 20px rgba(218, 165, 32, 0.3),
@@ -103,7 +118,7 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--iron-dark);
+  background: #f5f5f5;
   overflow-x: hidden;
 }
 
@@ -122,77 +137,86 @@ body {
   z-index: 0;
   overflow: hidden;
   background: linear-gradient(135deg,
-    var(--iron-dark) 0%,
-    #1e1e3f 25%,
-    var(--iron-gunmetal) 50%,
-    #2a1a1a 75%,
-    var(--iron-dark) 100%
+    #ffffff 0%,
+    #f0f0f0 25%,
+    #e8e8e8 50%,
+    #f5f5f5 75%,
+    #ffffff 100%
   );
   background-size: 400% 400%;
   animation: gradientFlow 20s ease infinite;
 }
 
-/* Floating Gradient Blobs */
+/* Floating Gradient Blobs - Vibrant & Prominent */
 .gradient-blob {
   position: absolute;
   border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.6;
-  mix-blend-mode: screen;
+  filter: blur(100px);
+  opacity: 0.7;
 }
 
 .gradient-blob-1 {
-  width: 600px;
-  height: 600px;
-  background: radial-gradient(circle, var(--iron-red) 0%, transparent 70%);
-  top: -10%;
-  left: -10%;
-  animation: blobMove1 25s ease-in-out infinite;
+  width: 800px;
+  height: 800px;
+  background: radial-gradient(circle, rgba(196, 30, 58, 0.8) 0%, rgba(196, 30, 58, 0.4) 40%, transparent 70%);
+  top: -20%;
+  left: -15%;
+  animation: blobMove1 20s ease-in-out infinite;
 }
 
 .gradient-blob-2 {
-  width: 500px;
-  height: 500px;
-  background: radial-gradient(circle, var(--iron-gold) 0%, transparent 70%);
-  top: 50%;
-  right: -5%;
-  animation: blobMove2 30s ease-in-out infinite;
+  width: 700px;
+  height: 700px;
+  background: radial-gradient(circle, rgba(255, 215, 0, 0.8) 0%, rgba(218, 165, 32, 0.5) 40%, transparent 70%);
+  top: 40%;
+  right: -10%;
+  animation: blobMove2 25s ease-in-out infinite;
 }
 
 .gradient-blob-3 {
-  width: 450px;
-  height: 450px;
-  background: radial-gradient(circle, var(--iron-blue-glow) 0%, transparent 70%);
-  bottom: -10%;
-  left: 30%;
-  animation: blobMove3 22s ease-in-out infinite;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(0, 212, 255, 0.7) 0%, rgba(0, 150, 200, 0.4) 40%, transparent 70%);
+  bottom: -15%;
+  left: 20%;
+  animation: blobMove3 18s ease-in-out infinite;
 }
 
 .gradient-blob-4 {
-  width: 350px;
-  height: 350px;
-  background: radial-gradient(circle, var(--iron-red-light) 0%, transparent 70%);
-  top: 30%;
-  left: 50%;
-  animation: blobMove1 28s ease-in-out infinite reverse;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(255, 100, 100, 0.7) 0%, rgba(196, 30, 58, 0.4) 40%, transparent 70%);
+  top: 20%;
+  left: 40%;
+  animation: blobMove1 22s ease-in-out infinite reverse;
 }
 
-/* Brushed Metal Header */
+/* Fifth blob for extra depth */
+.gradient-blob-5 {
+  width: 550px;
+  height: 550px;
+  background: radial-gradient(circle, rgba(255, 200, 50, 0.6) 0%, rgba(218, 165, 32, 0.3) 40%, transparent 70%);
+  top: 60%;
+  left: -5%;
+  animation: blobMove4 26s ease-in-out infinite;
+}
+
+/* Iron Man Red Header with Gold Text */
 .brushed-metal {
   background: linear-gradient(180deg,
-    #4a4a4a 0%,
-    #3a3a3a 2%,
-    #2d2d2d 4%,
-    #3a3a3a 6%,
-    #4a4a4a 8%,
-    #3d3d3d 50%,
-    #2a2a2a 52%,
-    #3a3a3a 100%
+    #c41e3a 0%,
+    #b01830 2%,
+    #9a1428 4%,
+    #b01830 6%,
+    #c41e3a 8%,
+    #a81525 50%,
+    #8b0000 52%,
+    #9a1428 100%
   );
-  border-bottom: 1px solid #1a1a1a;
+  border-bottom: 2px solid var(--iron-gold);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    0 2px 10px rgba(0, 0, 0, 0.5);
+    inset 0 1px 0 rgba(255, 215, 0, 0.3),
+    0 4px 15px rgba(139, 0, 0, 0.5);
 }
 
 /* Glossy Button Base */
@@ -453,23 +477,23 @@ input[type="range"]::-moz-range-thumb {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--iron-dark);
+  background: #e0e0e0;
   border-radius: 5px;
 }
 
 ::-webkit-scrollbar-thumb {
   background: linear-gradient(180deg,
-    var(--iron-gunmetal) 0%,
-    #3d4a5c 100%
+    var(--iron-red-light) 0%,
+    var(--iron-red) 100%
   );
   border-radius: 5px;
-  border: 2px solid var(--iron-dark);
+  border: 2px solid #e0e0e0;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(180deg,
-    #3d4a5c 0%,
-    var(--iron-silver) 100%
+    var(--iron-gold) 0%,
+    var(--iron-gold-light) 100%
   );
 }
 
@@ -599,15 +623,17 @@ a:hover {
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .gradient-blob {
-    opacity: 0.4;
+    opacity: 0.5;
   }
 
   .gradient-blob-1,
   .gradient-blob-2,
   .gradient-blob-3,
-  .gradient-blob-4 {
-    width: 300px;
-    height: 300px;
+  .gradient-blob-4,
+  .gradient-blob-5 {
+    width: 350px;
+    height: 350px;
+    filter: blur(60px);
   }
 
   .control-panel {
