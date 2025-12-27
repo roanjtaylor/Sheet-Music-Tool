@@ -16,7 +16,9 @@
       "Bash(npx eslint:*)",
       "Bash(find:*)",
       "Bash(git log:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "WebFetch(domain:lovable.dev)",
+      "Bash(npm run build:*)"
     ]
   }
 }

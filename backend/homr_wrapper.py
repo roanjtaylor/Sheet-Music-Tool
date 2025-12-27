@@ -406,8 +406,8 @@ def add_beam_elements_to_musicxml(musicxml_content: str) -> str:
                 if notes:
                     _finalize_beam_group(notes)
 
-    # Convert back to string
-    return ET.tostring(root, encoding='unicode')
+    # Convert back to string, restoring the XML declaration that ET.tostring strips
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding='unicode')
 
 
 def _finalize_beam_group(notes):
