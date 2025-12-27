@@ -296,9 +296,48 @@ export default function usePlayback(sheetDisplayRef) {
           if (el.tagName === 'note') {
             const noteEl = el;
 
-            // Skip grace notes and cue notes
-            if (noteEl.querySelector('grace') || noteEl.querySelector('cue')) {
+            // Skip cue notes (but not grace notes - we handle those specially)
+            if (noteEl.querySelector('cue')) {
               continue;
+            }
+
+            // Handle grace notes - play them with short duration before the main note
+            const graceEl = noteEl.querySelector('grace');
+            if (graceEl) {
+              const pitchEl = noteEl.querySelector('pitch');
+              if (pitchEl) {
+                const step = pitchEl.querySelector('step')?.textContent;
+                const octave = pitchEl.querySelector('octave')?.textContent;
+                if (step && octave) {
+                  // Build grace note name with accidentals
+                  const alterEl = pitchEl.querySelector('alter');
+                  const alter = alterEl ? parseInt(alterEl.textContent) : 0;
+                  let graceName = step;
+                  if (alter === 1) graceName += '#';
+                  else if (alter === -1) graceName += 'b';
+                  graceName += octave;
+
+                  // Grace notes are played with short duration just before the beat
+                  // Use 1/8 of a quarter note (0.125) as grace note duration
+                  const graceDuration = 0.125;
+                  // Place grace note slightly before the current cursor position
+                  const graceTime = Math.max(0, measureStartTime + cursor - graceDuration);
+
+                  notes.push({
+                    pitch: graceName,
+                    time: graceTime,
+                    duration: graceDuration,
+                    velocity: 0.6, // Slightly softer than main notes
+                    measureIndex,
+                    tieStart: false,
+                    tieStop: false,
+                    partIndex,
+                    staff: noteEl.querySelector('staff') ? parseInt(noteEl.querySelector('staff').textContent) || 1 : 1,
+                    isGrace: true, // Mark as grace note for potential special handling
+                  });
+                }
+              }
+              continue; // Don't process grace note further as regular note
             }
 
             const isChord = noteEl.querySelector('chord') !== null;
@@ -425,14 +464,29 @@ export default function usePlayback(sheetDisplayRef) {
 
             const finalTime = measureStartTime + noteTime;
 
-            // Detect ties (notes can have multiple tie elements for start+stop)
-            const tieEls = noteEl.querySelectorAll('tie');
+            // Detect ties - MusicXML has TWO ways to represent ties:
+            // 1. <tie type="start/stop"/> at note level (for sound/playback)
+            // 2. <tied type="start/stop"/> inside <notations> (for visual display)
+            // HOMR generates <tied> elements, so we need to check both!
             let tieStart = false;
             let tieStop = false;
+
+            // Check <tie> elements (at note level)
+            const tieEls = noteEl.querySelectorAll('tie');
             tieEls.forEach((tie) => {
               if (tie.getAttribute('type') === 'start') tieStart = true;
               if (tie.getAttribute('type') === 'stop') tieStop = true;
             });
+
+            // Check <tied> elements (inside <notations>) - this is what HOMR generates
+            const notationsEl = noteEl.querySelector('notations');
+            if (notationsEl) {
+              const tiedEls = notationsEl.querySelectorAll('tied');
+              tiedEls.forEach((tied) => {
+                if (tied.getAttribute('type') === 'start') tieStart = true;
+                if (tied.getAttribute('type') === 'stop') tieStop = true;
+              });
+            }
 
             // noteStaff was already extracted earlier for cursor tracking
 
@@ -446,6 +500,7 @@ export default function usePlayback(sheetDisplayRef) {
               tieStop,
               partIndex,  // Track which part this note belongs to
               staff: noteStaff,  // Track which staff within the part (1=treble, 2=bass for piano)
+              voice: noteVoice,  // Track voice for correct tie merging
             });
           }
         }
@@ -460,34 +515,65 @@ export default function usePlayback(sheetDisplayRef) {
     notes.sort((a, b) => a.time - b.time);
 
     // Merge tied notes (extend duration instead of playing twice)
-    // IMPORTANT: Only merge notes from the SAME part AND staff to avoid
-    // incorrectly merging notes from different hands (RH/LH) that happen
-    // to have the same pitch
+    // IMPORTANT: Only merge notes from the SAME part, staff, AND voice to avoid
+    // incorrectly merging notes from different hands or voices that happen
+    // to have the same pitch. Grace notes cannot have ties.
+    //
+    // This implementation uses a map-based approach to handle ties that span
+    // across non-adjacent notes (e.g., when notes from other voices are between them).
     const merged = [];
-    let i = 0;
-    while (i < notes.length) {
+    const tieMap = new Map(); // key: "pitch-staff-part-voice", value: index in merged array
+
+    for (let i = 0; i < notes.length; i++) {
       const note = { ...notes[i] };
-      // If this note starts a tie, find and merge continuations
-      while (
-        note.tieStart &&
-        i + 1 < notes.length &&
-        notes[i + 1].pitch === note.pitch &&
-        notes[i + 1].partIndex === note.partIndex &&  // Must be same part
-        notes[i + 1].staff === note.staff &&          // Must be same staff
-        notes[i + 1].tieStop
-      ) {
-        note.duration += notes[i + 1].duration;
-        // If the continuation also starts a new tie, keep looking
-        note.tieStart = notes[i + 1].tieStart;
-        i++;
+      // Include voice in the key to correctly match ties within the same voice
+      const key = `${note.pitch}-${note.staff}-${note.partIndex}-${note.voice}`;
+
+      // Skip grace notes from tie processing (they can't have ties)
+      if (note.isGrace) {
+        // Clean up and add grace note directly
+        delete note.tieStart;
+        delete note.tieStop;
+        delete note.partIndex;
+        delete note.staff;
+        delete note.voice;
+        delete note.isGrace;
+        merged.push(note);
+        continue;
       }
-      // Clean up internal tracking fields before returning
-      delete note.tieStart;
-      delete note.tieStop;
-      delete note.partIndex;
-      delete note.staff;
-      merged.push(note);
-      i++;
+
+      // If this note ends a tie and we have a pending tie for this pitch/voice
+      if (note.tieStop && tieMap.has(key)) {
+        const origIdx = tieMap.get(key);
+        // Extend the original note's duration
+        merged[origIdx].duration += note.duration;
+
+        // If this note also starts a new tie, update the map to point to the original
+        // (the chain continues from the same original note)
+        if (note.tieStart) {
+          // Keep the map entry pointing to the original note
+        } else {
+          // Tie chain ends here, remove from map
+          tieMap.delete(key);
+        }
+        // Don't add this note to merged (it's been absorbed)
+        continue;
+      }
+
+      // Clean up internal tracking fields before adding
+      const cleanNote = { ...note };
+      delete cleanNote.tieStart;
+      delete cleanNote.tieStop;
+      delete cleanNote.partIndex;
+      delete cleanNote.staff;
+      delete cleanNote.voice;
+      delete cleanNote.isGrace;
+      merged.push(cleanNote);
+
+      // If this note starts a tie, record its position for future continuation
+      if (note.tieStart) {
+        tieMap.set(key, merged.length - 1);
+      }
     }
 
     return merged;

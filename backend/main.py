@@ -1,10 +1,10 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List
+from typing import List, Dict, Any
 import time
 
-from homr_wrapper import process_sheet_music, extract_tempo_from_musicxml
+from homr_wrapper import process_sheet_music, extract_tempo_from_musicxml, extract_metadata_from_musicxml
 
 app = FastAPI(title="Sheet Music Tool API")
 
@@ -28,6 +28,7 @@ class ProcessResponse(BaseModel):
     warnings: List[str]
     errors: List[str]
     processing_time: float
+    metadata: Dict[str, Any] = {}  # Title, composer, tempo_text, time/key signatures
 
 
 @app.post("/process", response_model=ProcessResponse)
@@ -57,10 +58,12 @@ async def process_image(file: UploadFile = File(...)):
     musicxml, warnings, errors = process_sheet_music(content, file.filename)
     processing_time = time.time() - start_time
 
-    # Extract tempo from MusicXML
+    # Extract tempo and metadata from MusicXML
     tempo = 120
+    metadata = {}
     if musicxml:
         tempo = extract_tempo_from_musicxml(musicxml)
+        metadata = extract_metadata_from_musicxml(musicxml)
 
     success = bool(musicxml) and len(errors) == 0
 
@@ -70,7 +73,8 @@ async def process_image(file: UploadFile = File(...)):
         tempo=tempo,
         warnings=warnings,
         errors=errors,
-        processing_time=processing_time
+        processing_time=processing_time,
+        metadata=metadata
     )
 
 
