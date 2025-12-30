@@ -1,11 +1,12 @@
 import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { OpenSheetMusicDisplay as OSMD } from 'opensheetmusicdisplay';
-import { HIGHLIGHT_COLOR, DEFAULT_COLOR } from '../constants';
+import { HIGHLIGHT_COLOR, DEFAULT_COLOR, NOTE_TYPES, DEFAULT_NOTE_TYPE } from '../constants';
 
 const SheetDisplay = forwardRef(function SheetDisplay(
-  { musicxml, errors = [], zoom = 1.0 },
+  { musicxml, errors = [], zoom = 1.0, tempo = 120, noteType = DEFAULT_NOTE_TYPE },
   ref
 ) {
+  const currentNoteInfo = NOTE_TYPES.find(n => n.value === noteType) || NOTE_TYPES[2];
   const containerRef = useRef(null);
   const osmdRef = useRef(null);
 
@@ -423,11 +424,18 @@ const SheetDisplay = forwardRef(function SheetDisplay(
 
       {/* Sheet container with gradient border */}
       <div className="sheet-container p-1">
-        <div
-          ref={containerRef}
-          className="w-full bg-white rounded-lg overflow-auto"
-          style={{ minHeight: '400px' }}
-        />
+        <div className="w-full bg-white rounded-lg overflow-auto" style={{ minHeight: '400px' }}>
+          {/* Tempo marking - displayed above the first music line */}
+          <div className="px-6 pt-4 pb-0">
+            <div className="text-left font-serif text-lg text-black">
+              <span className="font-bold">{currentNoteInfo.symbol}</span>
+              <span className="mx-1">=</span>
+              <span className="font-semibold">{tempo}</span>
+            </div>
+          </div>
+          {/* OSMD container */}
+          <div ref={containerRef} className="w-full" />
+        </div>
       </div>
     </div>
   );

@@ -340,12 +340,11 @@ def add_beam_elements_to_musicxml(musicxml_content: str) -> str:
     work reliably when notes are in different voices due to chord duration grouping.
 
     Beaming rules:
-    - Beam consecutive eighth notes (and shorter) within the same measure and voice
+    - Beam consecutive eighth notes (and shorter) within the same measure, voice, AND staff
     - Don't beam across rests
-    - Don't beam notes with different voices
-    - Start new beam groups at beat boundaries (for common time signatures)
+    - Track timing positions to handle notes separated by backups/forwards
+    - Start new beam groups when there's a gap in timing or a rest
     """
-    import re
     from xml.etree import ElementTree as ET
 
     try:
@@ -358,53 +357,139 @@ def add_beam_elements_to_musicxml(musicxml_content: str) -> str:
     # Duration types that should be beamed
     beamable_types = {'eighth', '16th', '32nd', '64th', '128th'}
 
+    # Map note types to duration in divisions (relative values)
+    type_to_base_duration = {
+        'whole': 16, 'half': 8, 'quarter': 4, 'eighth': 2,
+        '16th': 1, '32nd': 0.5, '64th': 0.25, '128th': 0.125
+    }
+
     # Process each part
     for part in root.findall('.//part'):
+        # Get divisions (default to 4)
+        divisions = 4
+        div_el = part.find('.//divisions')
+        if div_el is not None and div_el.text:
+            divisions = int(div_el.text)
+
         # Process each measure
         for measure in part.findall('measure'):
-            # Group notes by voice
-            voice_notes = {}
+            # Check for divisions change in this measure
+            measure_div_el = measure.find('.//divisions')
+            if measure_div_el is not None and measure_div_el.text:
+                divisions = int(measure_div_el.text)
 
-            for note in measure.findall('note'):
-                # Skip rests, grace notes, and chord continuation notes
-                if note.find('rest') is not None:
-                    continue
-                if note.find('grace') is not None:
-                    continue
+            # Collect all notes with their timing positions
+            # Key: (voice, staff) -> list of (time_position, note_element)
+            voice_staff_notes = {}
+            current_time = 0
 
-                # Get voice (default to 1)
-                voice_el = note.find('voice')
-                voice = voice_el.text if voice_el is not None else '1'
+            for element in measure:
+                if element.tag == 'backup':
+                    dur_el = element.find('duration')
+                    if dur_el is not None and dur_el.text:
+                        current_time -= int(dur_el.text)
+                        if current_time < 0:
+                            current_time = 0
 
-                # Get note type
-                type_el = note.find('type')
-                if type_el is None:
-                    continue
-                note_type = type_el.text
+                elif element.tag == 'forward':
+                    dur_el = element.find('duration')
+                    if dur_el is not None and dur_el.text:
+                        current_time += int(dur_el.text)
 
-                # Check if this is a beamable note
-                if note_type not in beamable_types:
-                    # Non-beamable note breaks the beam group
-                    if voice in voice_notes and voice_notes[voice]:
-                        # End any pending beam group
-                        _finalize_beam_group(voice_notes[voice])
-                        voice_notes[voice] = []
-                    continue
+                elif element.tag == 'note':
+                    note = element
+                    is_chord = note.find('chord') is not None
+                    is_rest = note.find('rest') is not None
+                    is_grace = note.find('grace') is not None
 
-                # Check if this is a chord note (has <chord/> element)
-                is_chord = note.find('chord') is not None
+                    # Get duration
+                    dur_el = note.find('duration')
+                    duration = 0
+                    if dur_el is not None and dur_el.text:
+                        duration = int(dur_el.text)
 
-                # Initialize voice list if needed
-                if voice not in voice_notes:
-                    voice_notes[voice] = []
+                    # Get voice and staff
+                    voice_el = note.find('voice')
+                    voice = voice_el.text if voice_el is not None else '1'
+                    staff_el = note.find('staff')
+                    staff = staff_el.text if staff_el is not None else '1'
 
-                # Add note to the current beam group for this voice
-                voice_notes[voice].append(note)
+                    # Get note type
+                    type_el = note.find('type')
+                    note_type = type_el.text if type_el is not None else None
 
-            # Finalize any remaining beam groups
-            for voice, notes in voice_notes.items():
-                if notes:
-                    _finalize_beam_group(notes)
+                    key = (voice, staff)
+                    if key not in voice_staff_notes:
+                        voice_staff_notes[key] = []
+
+                    # Record note with its timing info
+                    voice_staff_notes[key].append({
+                        'time': current_time,
+                        'note': note,
+                        'duration': duration,
+                        'type': note_type,
+                        'is_rest': is_rest,
+                        'is_chord': is_chord,
+                        'is_grace': is_grace,
+                    })
+
+                    # Advance time (but not for chord notes - they share time with previous)
+                    if not is_chord and not is_grace:
+                        current_time += duration
+
+            # Now process each voice+staff group
+            for (voice, staff), note_infos in voice_staff_notes.items():
+                # Sort by time position
+                note_infos.sort(key=lambda x: x['time'])
+
+                # Group consecutive beamable notes at consecutive time positions
+                beam_groups = []
+                current_group = []
+                last_end_time = None
+
+                for info in note_infos:
+                    # Skip rests, grace notes, chord notes
+                    if info['is_rest'] or info['is_grace'] or info['is_chord']:
+                        # Rests break beam groups
+                        if info['is_rest'] and current_group:
+                            beam_groups.append(current_group)
+                            current_group = []
+                            last_end_time = None
+                        continue
+
+                    note_type = info['type']
+
+                    # Check if beamable
+                    if note_type not in beamable_types:
+                        # Non-beamable note breaks the group
+                        if current_group:
+                            beam_groups.append(current_group)
+                            current_group = []
+                        last_end_time = info['time'] + info['duration']
+                        continue
+
+                    # Check if consecutive in time (allowing for small gaps due to divisions)
+                    is_consecutive = (last_end_time is None or
+                                     info['time'] == last_end_time or
+                                     abs(info['time'] - last_end_time) <= 1)  # Small tolerance
+
+                    if is_consecutive:
+                        current_group.append(info['note'])
+                    else:
+                        # Gap in timing - finalize current group and start new
+                        if current_group:
+                            beam_groups.append(current_group)
+                        current_group = [info['note']]
+
+                    last_end_time = info['time'] + info['duration']
+
+                # Don't forget the last group
+                if current_group:
+                    beam_groups.append(current_group)
+
+                # Apply beaming to each group
+                for group in beam_groups:
+                    _finalize_beam_group(group)
 
     # Convert back to string, restoring the XML declaration that ET.tostring strips
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding='unicode')

@@ -96,7 +96,32 @@ export default function Upload({ onProcessed, isProcessing, setIsProcessing }) {
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState(null);
   const [progress, setProgress] = useState({ message: '', eta: null, total: null });
+  const [loadingTestFile, setLoadingTestFile] = useState(false);
   const fileInputRef = useRef(null);
+
+  // Load a pre-processed test file for instant testing
+  const loadTestFile = async (filename = 'LetItSnow') => {
+    if (isProcessing || loadingTestFile) return;
+
+    setError(null);
+    setLoadingTestFile(true);
+
+    try {
+      const response = await fetch(`${API_URL}/test-files/${filename}`);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to load test file');
+      }
+
+      const data = await response.json();
+      onProcessed(data);
+    } catch (err) {
+      setError(err.message || 'Failed to load test file');
+    } finally {
+      setLoadingTestFile(false);
+    }
+  };
 
   const validateFile = (file) => {
     if (!file) return 'No file selected';
@@ -305,6 +330,41 @@ export default function Upload({ onProcessed, isProcessing, setIsProcessing }) {
               <span className="px-3 py-1 text-xs font-medium text-[#808080] bg-[#2C3E50]/50 rounded-full border border-[#808080]/30">
                 Max 50MB
               </span>
+            </div>
+
+            {/* Quick test button */}
+            <div className="mt-4 pt-4 border-t border-[#DAA520]/20">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  loadTestFile('LetItSnow');
+                }}
+                disabled={loadingTestFile}
+                className={`
+                  px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
+                  ${loadingTestFile
+                    ? 'bg-[#2C3E50] text-[#5a5a6a] cursor-not-allowed'
+                    : 'bg-gradient-to-r from-[#1E3A5F] to-[#2C3E50] text-[#DAA520] hover:from-[#2C3E50] hover:to-[#1E3A5F] border border-[#DAA520]/30 hover:border-[#DAA520]/60'
+                  }
+                `}
+              >
+                {loadingTestFile ? (
+                  <span className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-[#DAA520] border-t-transparent rounded-full animate-spin" />
+                    Loading...
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                    </svg>
+                    Quick Test: Let It Snow
+                  </span>
+                )}
+              </button>
+              <p className="text-xs text-[#606060] mt-2">
+                Load pre-processed test file instantly
+              </p>
             </div>
           </div>
         )}

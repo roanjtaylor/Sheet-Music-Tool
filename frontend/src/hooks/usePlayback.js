@@ -1,11 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import * as Tone from 'tone';
-import { SALAMANDER_PIANO_URL, DEFAULT_TEMPO, MIN_TEMPO, MAX_TEMPO } from '../constants';
+import { SALAMANDER_PIANO_URL, DEFAULT_TEMPO, NOTE_TYPES, DEFAULT_NOTE_TYPE } from '../constants';
 
 export default function usePlayback(sheetDisplayRef) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [tempo, setTempo] = useState(DEFAULT_TEMPO);
+  const [noteType, setNoteType] = useState(DEFAULT_NOTE_TYPE);
   const [currentPosition, setCurrentPosition] = useState(0);
 
   const pianoRef = useRef(null);
@@ -598,6 +599,17 @@ export default function usePlayback(sheetDisplayRef) {
     }
   }, [sheetDisplayRef]);
 
+  // Get effective tempo in quarter notes per minute
+  // The user sets tempo for a specific note type (e.g., 120 quavers per minute)
+  // We need to convert this to quarter notes per minute for playback
+  const getEffectiveTempo = useCallback(() => {
+    const noteInfo = NOTE_TYPES.find(n => n.value === noteType) || NOTE_TYPES[2];
+    // multiplier: quarter=1, eighth=0.5, half=2, etc.
+    // If tempo is 120 quavers per minute, that's 60 quarters per minute
+    // effectiveTempo = tempo * multiplier
+    return tempo * noteInfo.multiplier;
+  }, [tempo, noteType]);
+
   // Schedule playback - simplified for reliable audio
   const schedulePlayback = useCallback(
     (notes, startOffset = 0) => {
@@ -608,8 +620,9 @@ export default function usePlayback(sheetDisplayRef) {
       scheduledEventsRef.current.forEach((id) => Tone.Transport.clear(id));
       scheduledEventsRef.current = [];
 
-      // Calculate seconds per quarter note based on tempo
-      const secondsPerQuarter = 60 / tempo;
+      // Calculate seconds per quarter note based on effective tempo
+      const effectiveTempo = getEffectiveTempo();
+      const secondsPerQuarter = 60 / effectiveTempo;
 
       // Reset cursor at start
       cursorPositionRef.current = 0;
@@ -670,7 +683,7 @@ export default function usePlayback(sheetDisplayRef) {
         scheduledEventsRef.current.push(endEventId);
       }
     },
-    [tempo, sheetDisplayRef, stop]
+    [getEffectiveTempo, sheetDisplayRef, stop]
   );
 
   // Play (always starts from beginning)
@@ -735,10 +748,13 @@ export default function usePlayback(sheetDisplayRef) {
     [isPlaying, pause, play]
   );
 
-  // Update tempo
+  // Update tempo and/or note type
   const updateTempo = useCallback(
-    (newTempo) => {
+    (newTempo, newNoteType) => {
       setTempo(newTempo);
+      if (newNoteType !== undefined) {
+        setNoteType(newNoteType);
+      }
 
       // If currently playing, reschedule with new tempo
       if (isPlaying && notesRef.current.length > 0) {
@@ -769,6 +785,7 @@ export default function usePlayback(sheetDisplayRef) {
     isPlaying,
     isLoading,
     tempo,
+    noteType,
     currentPosition,
     play,
     pause,

@@ -18,7 +18,8 @@
       "Bash(git log:*)",
       "Bash(dir:*)",
       "WebFetch(domain:lovable.dev)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(if not exist \"C:\\\\Users\\\\roanj\\\\Sheet Music Tool\\\\backend\\\\cache\" mkdir \"C:\\\\Users\\\\roanj\\\\Sheet Music Tool\\\\backend\\\\cache\")"
     ]
   }
 }

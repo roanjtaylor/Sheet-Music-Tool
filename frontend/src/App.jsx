@@ -106,6 +106,8 @@ function App() {
                 musicxml={result.musicxml}
                 errors={result.errors || []}
                 zoom={zoom}
+                tempo={playback.tempo}
+                noteType={playback.noteType}
               />
             </div>
           )}
@@ -117,6 +119,7 @@ function App() {
             isPlaying={playback.isPlaying}
             isLoading={playback.isLoading}
             tempo={playback.tempo}
+            noteType={playback.noteType}
             onPlayPause={handlePlayPause}
             onTempoChange={playback.setTempo}
             onZoomIn={handleZoomIn}
