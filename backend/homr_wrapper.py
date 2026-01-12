@@ -283,8 +283,10 @@ def process_sheet_music(image_bytes: bytes, filename: str) -> Tuple[str, List[st
             use_gpu_inference=use_gpu
         )
 
+        # Use large_page=True for better handling of high-resolution images
+        # This can improve accuracy on larger sheet music scans
         xml_args = XmlGeneratorArguments(
-            large_page=False,
+            large_page=True,
             metronome=None,
             tempo=None
         )
@@ -614,3 +616,232 @@ def extract_metadata_from_musicxml(musicxml_content: str) -> dict:
 
     # Remove None values for cleaner output
     return {k: v for k, v in metadata.items() if v is not None}
+
+
+def analyze_voices_from_musicxml(musicxml_content: str) -> dict:
+    """
+    Analyze voice/melody structure from MusicXML content.
+
+    This function identifies which voice/staff contains the primary melody
+    using the following convention-based approach:
+
+    MELODY DETECTION STRATEGY:
+    1. Staff 1 (treble clef) is assumed to contain the melody in piano music
+    2. Voice 1 within each staff is the primary voice
+    3. Higher notes within the same voice are typically melodic
+    4. Notes with longer durations often carry the melody
+    5. The most "active" voice (highest note density) in the treble staff
+       is likely the melody
+
+    This metadata enables future features like:
+    - Difficulty levels (simplify to melody only, add accompaniment gradually)
+    - Voice isolation for practice
+    - Melody highlighting during playback
+
+    Returns:
+        dict: Voice analysis with structure like:
+        {
+            'primary_melody': {
+                'part': 0,           # Part index (0 for single piano)
+                'staff': 1,          # Staff 1 = treble, 2 = bass
+                'voice': 1,          # Primary voice number
+                'confidence': 'high' # How confident we are in detection
+            },
+            'voices': [
+                {
+                    'part': 0,
+                    'staff': 1,
+                    'voice': 1,
+                    'note_count': 150,
+                    'pitch_range': {'low': 'C4', 'high': 'C6'},
+                    'avg_duration': 0.5,  # In quarter notes
+                    'is_melody': True
+                },
+                ...
+            ],
+            'total_notes': 300,
+            'total_measures': 32
+        }
+    """
+    from xml.etree import ElementTree as ET
+
+    try:
+        root = ET.fromstring(musicxml_content)
+    except ET.ParseError:
+        return {'error': 'Failed to parse MusicXML'}
+
+    # MIDI pitch conversion for comparison
+    def pitch_to_midi(step: str, octave: int, alter: int = 0) -> int:
+        """Convert pitch components to MIDI number for comparison."""
+        note_map = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
+        return 12 * (octave + 1) + note_map.get(step, 0) + alter
+
+    def midi_to_name(midi: int) -> str:
+        """Convert MIDI number back to note name."""
+        note_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+        octave = (midi // 12) - 1
+        note = note_names[midi % 12]
+        return f"{note}{octave}"
+
+    # Duration type to quarter note value
+    type_to_quarters = {
+        'whole': 4, 'half': 2, 'quarter': 1, 'eighth': 0.5,
+        '16th': 0.25, '32nd': 0.125, '64th': 0.0625
+    }
+
+    # Collect voice statistics
+    voice_stats = {}  # Key: (part_idx, staff, voice) -> stats
+    total_notes = 0
+    total_measures = 0
+
+    # Get global divisions
+    divisions = 1
+    div_el = root.find('.//divisions')
+    if div_el is not None and div_el.text:
+        divisions = int(div_el.text)
+
+    parts = root.findall('.//part')
+    for part_idx, part in enumerate(parts):
+        measures = part.findall('measure')
+        total_measures = max(total_measures, len(measures))
+
+        for measure in measures:
+            # Check for divisions in this measure
+            measure_div = measure.find('.//divisions')
+            if measure_div is not None and measure_div.text:
+                divisions = int(measure_div.text)
+
+            for note in measure.findall('note'):
+                # Skip rests and grace notes
+                if note.find('rest') is not None or note.find('grace') is not None:
+                    continue
+
+                pitch_el = note.find('pitch')
+                if pitch_el is None:
+                    continue
+
+                # Get voice and staff
+                voice_el = note.find('voice')
+                voice = int(voice_el.text) if voice_el is not None else 1
+                staff_el = note.find('staff')
+                staff = int(staff_el.text) if staff_el is not None else 1
+
+                # Get pitch info
+                step = pitch_el.find('step').text if pitch_el.find('step') is not None else 'C'
+                octave = int(pitch_el.find('octave').text) if pitch_el.find('octave') is not None else 4
+                alter_el = pitch_el.find('alter')
+                alter = int(alter_el.text) if alter_el is not None else 0
+
+                midi_pitch = pitch_to_midi(step, octave, alter)
+
+                # Get duration
+                duration = 1.0  # Default quarter note
+                type_el = note.find('type')
+                if type_el is not None and type_el.text in type_to_quarters:
+                    duration = type_to_quarters[type_el.text]
+
+                # Update voice stats
+                key = (part_idx, staff, voice)
+                if key not in voice_stats:
+                    voice_stats[key] = {
+                        'part': part_idx,
+                        'staff': staff,
+                        'voice': voice,
+                        'note_count': 0,
+                        'pitches': [],
+                        'durations': [],
+                    }
+
+                voice_stats[key]['note_count'] += 1
+                voice_stats[key]['pitches'].append(midi_pitch)
+                voice_stats[key]['durations'].append(duration)
+                total_notes += 1
+
+    # Process statistics and determine melody
+    voices = []
+    melody_candidate = None
+    highest_score = 0
+
+    for key, stats in voice_stats.items():
+        pitches = stats['pitches']
+        durations = stats['durations']
+
+        voice_info = {
+            'part': stats['part'],
+            'staff': stats['staff'],
+            'voice': stats['voice'],
+            'note_count': stats['note_count'],
+            'pitch_range': {
+                'low': midi_to_name(min(pitches)) if pitches else 'C4',
+                'high': midi_to_name(max(pitches)) if pitches else 'C4',
+            },
+            'avg_pitch': sum(pitches) / len(pitches) if pitches else 60,
+            'avg_duration': sum(durations) / len(durations) if durations else 1.0,
+            'is_melody': False  # Will be set below
+        }
+
+        # Calculate melody score:
+        # - Higher score for staff 1 (treble)
+        # - Higher score for voice 1
+        # - Higher score for higher average pitch
+        # - Higher score for more notes (active voice)
+        score = 0
+
+        # Staff 1 (treble) gets bonus
+        if voice_info['staff'] == 1:
+            score += 100
+
+        # Voice 1 gets bonus
+        if voice_info['voice'] == 1:
+            score += 50
+
+        # Higher average pitch gets bonus (melody usually in higher range)
+        score += voice_info['avg_pitch'] * 0.5
+
+        # More notes = more active = likely melody
+        score += voice_info['note_count'] * 0.1
+
+        if score > highest_score:
+            highest_score = score
+            melody_candidate = key
+
+        voices.append(voice_info)
+
+    # Mark the melody voice
+    for voice_info in voices:
+        key = (voice_info['part'], voice_info['staff'], voice_info['voice'])
+        if key == melody_candidate:
+            voice_info['is_melody'] = True
+
+    # Determine confidence
+    confidence = 'high'
+    if len(voices) == 1:
+        confidence = 'high'  # Only one voice, must be melody
+    elif melody_candidate and melody_candidate[1] != 1:
+        confidence = 'medium'  # Melody not in treble, unusual
+    elif len(voices) > 4:
+        confidence = 'medium'  # Many voices, harder to determine
+
+    # Build primary melody info
+    primary_melody = None
+    if melody_candidate:
+        primary_melody = {
+            'part': melody_candidate[0],
+            'staff': melody_candidate[1],
+            'voice': melody_candidate[2],
+            'confidence': confidence,
+            'detection_method': 'convention_based',
+            'description': (
+                'Melody detected using convention: Staff 1 (treble), Voice 1, '
+                'weighted by average pitch and note density. '
+                'This follows standard piano arrangement conventions where '
+                'the melody (singable tune) is in the right hand/treble clef.'
+            )
+        }
+
+    return {
+        'primary_melody': primary_melody,
+        'voices': voices,
+        'total_notes': total_notes,
+        'total_measures': total_measures,
+    }

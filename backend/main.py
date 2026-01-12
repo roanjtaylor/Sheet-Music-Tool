@@ -6,7 +6,12 @@ import time
 import os
 from pathlib import Path
 
-from homr_wrapper import process_sheet_music, extract_tempo_from_musicxml, extract_metadata_from_musicxml
+from homr_wrapper import (
+    process_sheet_music,
+    extract_tempo_from_musicxml,
+    extract_metadata_from_musicxml,
+    analyze_voices_from_musicxml
+)
 
 # Directory for pre-processed test files (cached MusicXML)
 CACHE_DIR = Path(__file__).parent / "cache"
@@ -35,6 +40,7 @@ class ProcessResponse(BaseModel):
     errors: List[str]
     processing_time: float
     metadata: Dict[str, Any] = {}  # Title, composer, tempo_text, time/key signatures
+    voiceAnalysis: Optional[Dict[str, Any]] = None  # Voice/melody detection for levels system
 
 
 @app.post("/process", response_model=ProcessResponse)
@@ -64,12 +70,14 @@ async def process_image(file: UploadFile = File(...)):
     musicxml, warnings, errors = process_sheet_music(content, file.filename)
     processing_time = time.time() - start_time
 
-    # Extract tempo and metadata from MusicXML
+    # Extract tempo, metadata, and voice analysis from MusicXML
     tempo = 120
     metadata = {}
+    voice_analysis = None
     if musicxml:
         tempo = extract_tempo_from_musicxml(musicxml)
         metadata = extract_metadata_from_musicxml(musicxml)
+        voice_analysis = analyze_voices_from_musicxml(musicxml)
 
     success = bool(musicxml) and len(errors) == 0
 
@@ -80,7 +88,8 @@ async def process_image(file: UploadFile = File(...)):
         warnings=warnings,
         errors=errors,
         processing_time=processing_time,
-        metadata=metadata
+        metadata=metadata,
+        voiceAnalysis=voice_analysis
     )
 
 
@@ -139,6 +148,7 @@ async def get_test_file(filename: str):
         musicxml = cache_path.read_text(encoding="utf-8")
         tempo = extract_tempo_from_musicxml(musicxml)
         metadata = extract_metadata_from_musicxml(musicxml)
+        voice_analysis = analyze_voices_from_musicxml(musicxml)
 
         return ProcessResponse(
             success=True,
@@ -147,7 +157,8 @@ async def get_test_file(filename: str):
             warnings=["Loaded from cache (instant)"],
             errors=[],
             processing_time=0.0,
-            metadata=metadata
+            metadata=metadata,
+            voiceAnalysis=voice_analysis
         )
 
     # No cache - process the image and cache it
@@ -165,9 +176,11 @@ async def get_test_file(filename: str):
 
     tempo = 120
     metadata = {}
+    voice_analysis = None
     if musicxml:
         tempo = extract_tempo_from_musicxml(musicxml)
         metadata = extract_metadata_from_musicxml(musicxml)
+        voice_analysis = analyze_voices_from_musicxml(musicxml)
 
     success = bool(musicxml) and len(errors) == 0
 
@@ -178,7 +191,8 @@ async def get_test_file(filename: str):
         warnings=warnings,
         errors=errors,
         processing_time=processing_time,
-        metadata=metadata
+        metadata=metadata,
+        voiceAnalysis=voice_analysis
     )
 
 

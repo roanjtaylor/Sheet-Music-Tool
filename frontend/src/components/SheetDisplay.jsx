@@ -72,18 +72,46 @@ const SheetDisplay = forwardRef(function SheetDisplay(
     if (!svgContainer) return;
 
     // Find all elements with highlight fill and reset to default
-    const redElements = svgContainer.querySelectorAll(`[fill="${HIGHLIGHT_COLOR}"], [fill="red"]`);
-    redElements.forEach((el) => {
+    const redFillElements = svgContainer.querySelectorAll(`[fill="${HIGHLIGHT_COLOR}"], [fill="red"]`);
+    redFillElements.forEach((el) => {
       el.setAttribute('fill', DEFAULT_COLOR);
     });
 
-    // Also check style.fill
-    const allPaths = svgContainer.querySelectorAll('path, ellipse');
-    allPaths.forEach((el) => {
+    // Find all elements with highlight stroke (for stems, beams, etc.) and reset
+    // This includes stems where we explicitly set stroke during highlighting
+    const redStrokeElements = svgContainer.querySelectorAll(`[stroke="${HIGHLIGHT_COLOR}"], [stroke="red"]`);
+    redStrokeElements.forEach((el) => {
+      // Reset stroke to black (default for stems)
+      el.setAttribute('stroke', DEFAULT_COLOR);
+    });
+
+    // Also check style.fill and style.stroke for inline styles
+    const allShapes = svgContainer.querySelectorAll('path, ellipse, line, rect');
+    allShapes.forEach((el) => {
+      // Reset fill styles
       if (el.style.fill === HIGHLIGHT_COLOR || el.style.fill === 'red' || el.style.fill === 'rgb(255, 0, 0)') {
         el.style.fill = '';
         el.setAttribute('fill', DEFAULT_COLOR);
       }
+      // Reset stroke styles
+      if (el.style.stroke === HIGHLIGHT_COLOR || el.style.stroke === 'red' || el.style.stroke === 'rgb(255, 0, 0)') {
+        el.style.stroke = '';
+        el.setAttribute('stroke', DEFAULT_COLOR);
+      }
+    });
+
+    // Reset any stem groups that were highlighted
+    const stemGroups = svgContainer.querySelectorAll('.vf-stem, [class*="stem"]');
+    stemGroups.forEach((stemGroup) => {
+      const paths = stemGroup.querySelectorAll('path, line, rect');
+      paths.forEach((path) => {
+        if (path.getAttribute('stroke') === HIGHLIGHT_COLOR || path.getAttribute('stroke') === 'red') {
+          path.setAttribute('stroke', DEFAULT_COLOR);
+        }
+        if (path.getAttribute('fill') === HIGHLIGHT_COLOR || path.getAttribute('fill') === 'red') {
+          path.setAttribute('fill', DEFAULT_COLOR);
+        }
+      });
     });
   }, []);
 
@@ -118,21 +146,159 @@ const SheetDisplay = forwardRef(function SheetDisplay(
         // Some OSMD versions may not have this method
       }
 
+      // Helper function to color all parts of a note (head, stem, beam, flags)
+      const colorNoteElement = (svgElement) => {
+        if (!svgElement) return;
+
+        // Color all paths and shapes - handles note heads (ellipse/path with fill)
+        // and stems/beams/flags (path with stroke)
+        const shapes = svgElement.querySelectorAll('path, ellipse, line, rect');
+        shapes.forEach((shape) => {
+          // Set fill for note heads and filled elements
+          const currentFill = shape.getAttribute('fill');
+          if (currentFill && currentFill !== 'none' && currentFill !== 'transparent') {
+            shape.setAttribute('fill', HIGHLIGHT_COLOR);
+          }
+
+          // Set stroke for stems, beams, and outlined elements
+          // Stems often don't have an explicit stroke attribute - they use default black
+          // So we need to set stroke on all path/line elements that could be stems
+          const currentStroke = shape.getAttribute('stroke');
+          if (currentStroke && currentStroke !== 'none' && currentStroke !== 'transparent') {
+            shape.setAttribute('stroke', HIGHLIGHT_COLOR);
+          }
+
+          // For paths and lines without explicit stroke, check computed style
+          // and set stroke anyway since stems render as black by default
+          if (shape.tagName.toLowerCase() === 'path' || shape.tagName.toLowerCase() === 'line') {
+            const computedStyle = window.getComputedStyle(shape);
+            const computedStroke = computedStyle.stroke;
+            // If it has any visible stroke (computed), set our highlight color
+            if (computedStroke && computedStroke !== 'none' && computedStroke !== 'transparent') {
+              shape.setAttribute('stroke', HIGHLIGHT_COLOR);
+            }
+            // Also set stroke if the path has stroke-width (means it's meant to be stroked)
+            const strokeWidth = computedStyle.strokeWidth;
+            if (strokeWidth && parseFloat(strokeWidth) > 0) {
+              shape.setAttribute('stroke', HIGHLIGHT_COLOR);
+            }
+          }
+        });
+
+        // Also look for stem groups (VexFlow uses class 'vf-stem' for stem groups)
+        const stemGroups = svgElement.querySelectorAll('.vf-stem, [class*="stem"]');
+        stemGroups.forEach((stemGroup) => {
+          const stemPaths = stemGroup.querySelectorAll('path, line, rect');
+          stemPaths.forEach((path) => {
+            path.setAttribute('stroke', HIGHLIGHT_COLOR);
+            // Some stems might use fill instead of stroke for thick stems
+            const currentFill = path.getAttribute('fill');
+            if (currentFill && currentFill !== 'none' && currentFill !== 'transparent') {
+              path.setAttribute('fill', HIGHLIGHT_COLOR);
+            }
+          });
+        });
+      };
+
       // Color each graphical note red
       gNotesUnderCursor.forEach((gNote) => {
         let svgElement = null;
+        let vfNote = null;
 
-        // Try different paths to get the SVG element
+        // Try different paths to get the SVG element and VexFlow note
         if (gNote.vfnote && gNote.vfnote[0] && gNote.vfnote[0].attrs) {
           svgElement = gNote.vfnote[0].attrs.el;
+          vfNote = gNote.vfnote[0];
         } else if (gNote.vfnote && gNote.vfnote.attrs) {
           svgElement = gNote.vfnote.attrs.el;
+          vfNote = gNote.vfnote;
         }
 
+        colorNoteElement(svgElement);
+
+        // Also try to find and color the stem via VexFlow's stem property
+        if (vfNote && vfNote.stem) {
+          try {
+            // VexFlow stem object may have its own SVG element
+            if (vfNote.stem.el) {
+              colorNoteElement(vfNote.stem.el);
+            }
+            // Or access via attrs
+            if (vfNote.stem.attrs && vfNote.stem.attrs.el) {
+              colorNoteElement(vfNote.stem.attrs.el);
+            }
+          } catch {
+            // Ignore stem access errors
+          }
+        }
+
+        // Search parent groups for stems - stems might be siblings in the parent container
+        if (svgElement && svgElement.parentElement) {
+          const parent = svgElement.parentElement;
+          // Look for stem elements in the parent group
+          const siblingStems = parent.querySelectorAll('.vf-stem path, .vf-stem line, .vf-stem rect');
+          siblingStems.forEach((stemPath) => {
+            stemPath.setAttribute('stroke', HIGHLIGHT_COLOR);
+            const fill = stemPath.getAttribute('fill');
+            if (fill && fill !== 'none' && fill !== 'transparent') {
+              stemPath.setAttribute('fill', HIGHLIGHT_COLOR);
+            }
+          });
+
+          // Also check grandparent for stems (beam groups are often at higher level)
+          if (parent.parentElement) {
+            const grandparent = parent.parentElement;
+            const gpStems = grandparent.querySelectorAll('.vf-stem path, .vf-stem line, .vf-stem rect');
+            gpStems.forEach((stemPath) => {
+              stemPath.setAttribute('stroke', HIGHLIGHT_COLOR);
+              const fill = stemPath.getAttribute('fill');
+              if (fill && fill !== 'none' && fill !== 'transparent') {
+                stemPath.setAttribute('fill', HIGHLIGHT_COLOR);
+              }
+            });
+          }
+        }
+
+        // Try to find stem by ID pattern (OSMD uses "vf-{id}-stem" pattern)
         if (svgElement) {
-          const paths = svgElement.querySelectorAll('path, ellipse');
-          paths.forEach((path) => {
-            path.setAttribute('fill', HIGHLIGHT_COLOR);
+          const noteId = svgElement.id || svgElement.getAttribute('id');
+          if (noteId) {
+            const svgRoot = containerRef.current?.querySelector('svg');
+            if (svgRoot) {
+              // Look for stem element with matching ID
+              const stemId = noteId + '-stem';
+              const stemById = svgRoot.querySelector(`#${CSS.escape(stemId)}, [id="${stemId}"]`);
+              if (stemById) {
+                colorNoteElement(stemById);
+              }
+              // Also try without the vf- prefix variations
+              const stemIdVariants = [
+                `vf-${noteId}-stem`,
+                `${noteId.replace('vf-', '')}-stem`,
+              ];
+              stemIdVariants.forEach((sid) => {
+                try {
+                  const stemEl = svgRoot.querySelector(`[id="${sid}"]`);
+                  if (stemEl) colorNoteElement(stemEl);
+                } catch {
+                  // Invalid selector, skip
+                }
+              });
+            }
+          }
+        }
+
+        // Final fallback: color all children of the note's parent that look like stems
+        // (thin tall rectangles or vertical paths)
+        if (svgElement && svgElement.parentElement) {
+          const allRects = svgElement.parentElement.querySelectorAll('rect');
+          allRects.forEach((rect) => {
+            // Stems are typically thin (width < 5) and tall (height > width * 3)
+            const width = parseFloat(rect.getAttribute('width')) || 0;
+            const height = parseFloat(rect.getAttribute('height')) || 0;
+            if (width > 0 && width < 5 && height > width * 3) {
+              rect.setAttribute('fill', HIGHLIGHT_COLOR);
+            }
           });
         }
       });
@@ -150,10 +316,19 @@ const SheetDisplay = forwardRef(function SheetDisplay(
                   gNoteArray.forEach((gn) => {
                     if (gn?.vfnote?.[0]?.attrs?.el) {
                       const svgEl = gn.vfnote[0].attrs.el;
-                      const paths = svgEl.querySelectorAll('path, ellipse');
-                      paths.forEach((path) => {
-                        path.setAttribute('fill', HIGHLIGHT_COLOR);
-                      });
+                      colorNoteElement(svgEl);
+
+                      // Also color stems in parent hierarchy
+                      if (svgEl.parentElement) {
+                        const allRects = svgEl.parentElement.querySelectorAll('rect');
+                        allRects.forEach((rect) => {
+                          const width = parseFloat(rect.getAttribute('width')) || 0;
+                          const height = parseFloat(rect.getAttribute('height')) || 0;
+                          if (width > 0 && width < 5 && height > width * 3) {
+                            rect.setAttribute('fill', HIGHLIGHT_COLOR);
+                          }
+                        });
+                      }
                     }
                   });
                 }
