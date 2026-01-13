@@ -217,6 +217,7 @@ const SheetDisplay = forwardRef(function SheetDisplay(
         colorNoteElement(svgElement);
 
         // Also try to find and color the stem via VexFlow's stem property
+        // This is the correct way - access the note's OWN stem reference
         if (vfNote && vfNote.stem) {
           try {
             // VexFlow stem object may have its own SVG element
@@ -232,34 +233,8 @@ const SheetDisplay = forwardRef(function SheetDisplay(
           }
         }
 
-        // Search parent groups for stems - stems might be siblings in the parent container
-        if (svgElement && svgElement.parentElement) {
-          const parent = svgElement.parentElement;
-          // Look for stem elements in the parent group
-          const siblingStems = parent.querySelectorAll('.vf-stem path, .vf-stem line, .vf-stem rect');
-          siblingStems.forEach((stemPath) => {
-            stemPath.setAttribute('stroke', HIGHLIGHT_COLOR);
-            const fill = stemPath.getAttribute('fill');
-            if (fill && fill !== 'none' && fill !== 'transparent') {
-              stemPath.setAttribute('fill', HIGHLIGHT_COLOR);
-            }
-          });
-
-          // Also check grandparent for stems (beam groups are often at higher level)
-          if (parent.parentElement) {
-            const grandparent = parent.parentElement;
-            const gpStems = grandparent.querySelectorAll('.vf-stem path, .vf-stem line, .vf-stem rect');
-            gpStems.forEach((stemPath) => {
-              stemPath.setAttribute('stroke', HIGHLIGHT_COLOR);
-              const fill = stemPath.getAttribute('fill');
-              if (fill && fill !== 'none' && fill !== 'transparent') {
-                stemPath.setAttribute('fill', HIGHLIGHT_COLOR);
-              }
-            });
-          }
-        }
-
         // Try to find stem by ID pattern (OSMD uses "vf-{id}-stem" pattern)
+        // This is safe because we're looking for a specific ID, not all stems
         if (svgElement) {
           const noteId = svgElement.id || svgElement.getAttribute('id');
           if (noteId) {
@@ -267,9 +242,13 @@ const SheetDisplay = forwardRef(function SheetDisplay(
             if (svgRoot) {
               // Look for stem element with matching ID
               const stemId = noteId + '-stem';
-              const stemById = svgRoot.querySelector(`#${CSS.escape(stemId)}, [id="${stemId}"]`);
-              if (stemById) {
-                colorNoteElement(stemById);
+              try {
+                const stemById = svgRoot.querySelector(`#${CSS.escape(stemId)}, [id="${stemId}"]`);
+                if (stemById) {
+                  colorNoteElement(stemById);
+                }
+              } catch {
+                // Invalid selector, skip
               }
               // Also try without the vf- prefix variations
               const stemIdVariants = [
@@ -288,11 +267,22 @@ const SheetDisplay = forwardRef(function SheetDisplay(
           }
         }
 
-        // Final fallback: color all children of the note's parent that look like stems
-        // (thin tall rectangles or vertical paths)
-        if (svgElement && svgElement.parentElement) {
-          const allRects = svgElement.parentElement.querySelectorAll('rect');
-          allRects.forEach((rect) => {
+        // Look for stem ONLY within the note's immediate SVG group (not parent containers)
+        // This avoids coloring stems from other notes in the same system
+        if (svgElement) {
+          // Only search within this specific element, not parents
+          const localStems = svgElement.querySelectorAll('.vf-stem path, .vf-stem line, .vf-stem rect');
+          localStems.forEach((stemPath) => {
+            stemPath.setAttribute('stroke', HIGHLIGHT_COLOR);
+            const fill = stemPath.getAttribute('fill');
+            if (fill && fill !== 'none' && fill !== 'transparent') {
+              stemPath.setAttribute('fill', HIGHLIGHT_COLOR);
+            }
+          });
+
+          // Check for thin rectangles ONLY within this element (stems can be rects)
+          const localRects = svgElement.querySelectorAll('rect');
+          localRects.forEach((rect) => {
             // Stems are typically thin (width < 5) and tall (height > width * 3)
             const width = parseFloat(rect.getAttribute('width')) || 0;
             const height = parseFloat(rect.getAttribute('height')) || 0;
@@ -318,17 +308,16 @@ const SheetDisplay = forwardRef(function SheetDisplay(
                       const svgEl = gn.vfnote[0].attrs.el;
                       colorNoteElement(svgEl);
 
-                      // Also color stems in parent hierarchy
-                      if (svgEl.parentElement) {
-                        const allRects = svgEl.parentElement.querySelectorAll('rect');
-                        allRects.forEach((rect) => {
-                          const width = parseFloat(rect.getAttribute('width')) || 0;
-                          const height = parseFloat(rect.getAttribute('height')) || 0;
-                          if (width > 0 && width < 5 && height > width * 3) {
-                            rect.setAttribute('fill', HIGHLIGHT_COLOR);
-                          }
-                        });
-                      }
+                      // Color stems ONLY within this specific note's element
+                      // Do NOT search parent hierarchy as that catches other notes' stems
+                      const localRects = svgEl.querySelectorAll('rect');
+                      localRects.forEach((rect) => {
+                        const width = parseFloat(rect.getAttribute('width')) || 0;
+                        const height = parseFloat(rect.getAttribute('height')) || 0;
+                        if (width > 0 && width < 5 && height > width * 3) {
+                          rect.setAttribute('fill', HIGHLIGHT_COLOR);
+                        }
+                      });
                     }
                   });
                 }

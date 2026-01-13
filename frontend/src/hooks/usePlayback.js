@@ -612,7 +612,7 @@ export default function usePlayback(sheetDisplayRef) {
 
   // Schedule playback - simplified for reliable audio
   const schedulePlayback = useCallback(
-    (notes, startOffset = 0) => {
+    (notes, startOffset = 0, isResume = false) => {
       const piano = pianoRef.current;
       if (!piano) return;
 
@@ -624,10 +624,12 @@ export default function usePlayback(sheetDisplayRef) {
       const effectiveTempo = getEffectiveTempo();
       const secondsPerQuarter = 60 / effectiveTempo;
 
-      // Reset cursor at start
-      cursorPositionRef.current = 0;
-      if (sheetDisplayRef?.current) {
-        sheetDisplayRef.current.resetCursor();
+      // Only reset cursor when starting from the beginning, not when resuming
+      if (!isResume) {
+        cursorPositionRef.current = 0;
+        if (sheetDisplayRef?.current) {
+          sheetDisplayRef.current.resetCursor();
+        }
       }
 
       // Track last highlighted time to avoid duplicate highlights
@@ -730,22 +732,47 @@ export default function usePlayback(sheetDisplayRef) {
     pauseTimeRef.current = Tone.now() - startTimeRef.current;
     setIsPlaying(false);
 
-    // Clear highlights
-    if (sheetDisplayRef?.current) {
-      sheetDisplayRef.current.clearHighlights();
+    // Don't clear highlights when pausing - keep them visible to show position
+  }, [isPlaying]);
+
+  // Resume from paused position
+  const resume = useCallback(async () => {
+    if (isPlaying || notesRef.current.length === 0) return;
+
+    try {
+      // Initialize audio context if needed
+      await Tone.start();
+      await initPiano();
+
+      // Resume from saved pause time
+      const resumeOffset = pauseTimeRef.current;
+
+      // Re-schedule playback from the pause point
+      schedulePlayback(notesRef.current, resumeOffset, true);
+
+      // Start transport
+      startTimeRef.current = Tone.now() - resumeOffset;
+      Tone.Transport.start();
+      setIsPlaying(true);
+    } catch (err) {
+      console.error('Resume error:', err);
     }
-  }, [isPlaying, sheetDisplayRef]);
+  }, [isPlaying, initPiano, schedulePlayback]);
 
   // Toggle play/pause
   const togglePlayPause = useCallback(
     (musicxml) => {
       if (isPlaying) {
         pause();
+      } else if (pauseTimeRef.current > 0 && notesRef.current.length > 0) {
+        // Resume from paused position
+        resume();
       } else {
+        // Start from beginning
         play(musicxml);
       }
     },
-    [isPlaying, pause, play]
+    [isPlaying, pause, play, resume]
   );
 
   // Update tempo and/or note type
@@ -762,7 +789,8 @@ export default function usePlayback(sheetDisplayRef) {
         Tone.Transport.stop();
         Tone.Transport.cancel();
 
-        schedulePlayback(notesRef.current, currentTime);
+        // Pass isResume=true to avoid resetting cursor position
+        schedulePlayback(notesRef.current, currentTime, true);
         startTimeRef.current = Tone.now() - currentTime;
         Tone.Transport.start();
       }
@@ -789,6 +817,7 @@ export default function usePlayback(sheetDisplayRef) {
     currentPosition,
     play,
     pause,
+    resume,
     stop,
     togglePlayPause,
     setTempo: updateTempo,
